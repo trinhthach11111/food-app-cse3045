@@ -4,7 +4,7 @@ from pydantic import BaseModel
 from typing import List, Optional
 from backend.db import get_db_connection
 
-app = FastAPI()
+app = FastAPI(title="VJU Food API")
 
 app.add_middleware(
     CORSMiddleware,
@@ -36,6 +36,11 @@ class CreateOrderSchema(BaseModel):
     payment_method: str  # 'cash' hoặc 'qr_code'
     items: List[OrderItemSchema]
 
+# --- Route Trang chủ (Health Check) ---
+@app.get("/")
+def read_root():
+    return {"status": "online", "message": "VJU Food Backend API is running!"}
+
 # --- API Đăng ký / Đăng nhập ---
 @app.post("/register")
 def register(user: UserRegister):
@@ -56,30 +61,34 @@ def register(user: UserRegister):
 def login(user: UserLogin):
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
-    query = "SELECT id, username, role, full_name FROM users WHERE username = %s AND password_hash = %s"
-    cursor.execute(query, (user.username, user.password))
-    account = cursor.fetchone()
-    cursor.close()
-    conn.close()
-    if account:
-        return {"message": "Đăng nhập thành công", "user": account}
-    raise HTTPException(status_code=401, detail="Sai tài khoản hoặc mật khẩu")
+    try:
+        query = "SELECT id, username, role, full_name FROM users WHERE username = %s AND password_hash = %s"
+        cursor.execute(query, (user.username, user.password))
+        account = cursor.fetchone()
+        if account:
+            return {"message": "Đăng nhập thành công", "user": account}
+        raise HTTPException(status_code=401, detail="Sai tài khoản hoặc mật khẩu")
+    finally:
+        cursor.close()
+        conn.close()
 
 # --- API Danh sách & Tìm kiếm món ăn ---
 @app.get("/products")
 def get_products(search: Optional[str] = None):
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
-    if search:
-        query = "SELECT * FROM products WHERE name LIKE %s AND is_available = TRUE"
-        cursor.execute(query, (f"%{search}%",))
-    else:
-        query = "SELECT * FROM products WHERE is_available = TRUE"
-        cursor.execute(query)
-    products = cursor.fetchall()
-    cursor.close()
-    conn.close()
-    return products
+    try:
+        if search:
+            query = "SELECT * FROM products WHERE name LIKE %s AND is_available = TRUE"
+            cursor.execute(query, (f"%{search}%",))
+        else:
+            query = "SELECT * FROM products WHERE is_available = TRUE"
+            cursor.execute(query)
+        products = cursor.fetchall()
+        return products
+    finally:
+        cursor.close()
+        conn.close()
 
 # --- API Tạo đơn hàng & Thanh toán ---
 @app.post("/orders")
@@ -89,14 +98,12 @@ def create_order(order: CreateOrderSchema):
     try:
         # Tính tổng tiền từ CSDL
         total_amount = 0
-        product_prices = {}
         for item in order.items:
             cursor.execute("SELECT price FROM products WHERE id = %s", (item.product_id,))
             p = cursor.fetchone()
             if not p:
                 raise HTTPException(status_code=404, detail=f"Món ID {item.product_id} không tồn tại")
             total_amount += float(p['price']) * item.quantity
-            product_prices[item.product_id] = float(p['price'])
 
         # Tạo bản ghi đơn hàng
         order_sql = "INSERT INTO orders (customer_id, delivery_area, total_amount, payment_method) VALUES (%s, %s, %s, %s)"
@@ -116,6 +123,9 @@ def create_order(order: CreateOrderSchema):
             "payment_method": order.payment_method,
             "qr_code_url": f"https://img.vietqr.io/image/MB-0354123456-compact2.png?amount={int(total_amount)}&addInfo=VJUFOOD{order_id}" if order.payment_method == "qr_code" else None
         }
+    except HTTPException as he:
+        conn.rollback()
+        raise he
     except Exception as e:
         conn.rollback()
         raise HTTPException(status_code=500, detail=str(e))
