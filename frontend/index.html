@@ -75,7 +75,7 @@
             const grid = document.getElementById('foodGrid');
             grid.innerHTML = products.map(p => `
                 <div class="food-card">
-                    <img src="${p.image_url || 'https://via.placeholder.com/150'}" alt="${p.name}">
+                    <img src="${p.image_url && p.image_url.trim() !== '' ? p.image_url : 'https://picsum.photos/400/300'}" alt="${p.name}">
                     <h4>${p.name}</h4>
                     <p style="color:red; font-weight:bold;">${parseInt(p.price).toLocaleString()} VNĐ</p>
                     <button class="btn" onclick="addToCart(${p.id}, '${p.name}', ${p.price})">+ Thêm món</button>
