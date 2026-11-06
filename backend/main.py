@@ -77,18 +77,22 @@ def get_products(search: Optional[str] = None):
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
     try:
-        if search:
+        # Nếu search có chữ thực sự (không phải None và không phải chuỗi rỗng "")
+        if search and search.strip():
             query = "SELECT * FROM products WHERE name LIKE %s AND is_available = TRUE"
-            cursor.execute(query, (f"%{search}%",))
+            cursor.execute(query, (f"%{search.strip()}%",))
         else:
+            # Lấy toàn bộ danh sách 19 món trong CSDL
             query = "SELECT * FROM products WHERE is_available = TRUE"
             cursor.execute(query)
+            
         products = cursor.fetchall()
         return products
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
     finally:
         cursor.close()
         conn.close()
-
 # --- API Tạo đơn hàng & Thanh toán ---
 @app.post("/orders")
 def create_order(order: CreateOrderSchema):
