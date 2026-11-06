@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <title>VJU Food - Đặt Đồ Ăn Sinh Viên</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #f8f9fa; }
+        .container { max-width: 1000px; margin: 0 auto; display: flex; gap: 20px; }
+        .main-content { flex: 2; }
+        .sidebar { flex: 1; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); height: fit-content; }
+        .search-box { margin-bottom: 20px; display: flex; gap: 10px; }
+        .search-box input { flex: 1; padding: 10px; border: 1px solid #ccc; border-radius: 4px; }
+        .food-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 15px; }
+        .food-card { background: white; padding: 15px; border-radius: 8px; border: 1px solid #eee; text-align: center; }
+        .food-card img { width: 100%; height: 120px; object-fit: cover; border-radius: 6px; }
+        .btn { background: #ff9800; color: white; border: none; padding: 8px 12px; border-radius: 4px; cursor: pointer; font-weight: bold; }
+        .btn:hover { background: #e68a00; }
+        .btn-danger { background: #f44336; }
+        .cart-item { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; border-bottom: 1px solid #eee; padding-bottom: 5px; }
+        select, input[type="text"] { width: 100%; padding: 8px; margin: 8px 0; box-sizing: border-box; }
+    </style>
+</head>
+<body>
+    <h1>🍜 VJU Food - Đặt Đồ Ăn Sinh Viên</h1>
+    <div class="container">
+        <!-- Danh sách món ăn -->
+        <div class="main-content">
+            <div class="search-box">
+                <input type="text" id="searchInput" placeholder="Tìm kiếm món ăn, đồ uống...">
+                <button class="btn" onclick="loadProducts()">Tìm kiếm</button>
+            </div>
+            <div id="foodGrid" class="food-grid"></div>
+        </div>
+
+        <!-- Giỏ hàng & Thanh toán -->
+        <div class="sidebar">
+            <h3>🛒 Giỏ hàng của bạn</h3>
+            <div id="cartItems">Chưa có món nào trong giỏ.</div>
+            <hr>
+            <h4>Tổng tiền: <span id="totalPrice" style="color:red;">0 VNĐ</span></h4>
+            
+            <label><b>Chọn khu vực giao hàng:</b></label>
+            <select id="deliveryArea">
+                <option value="Tòa nhà VJU Hòa Lạc">Tòa nhà VJU Hòa Lạc</option>
+                <option value="Ký túc xá Sinh viên">Ký túc xá Sinh viên</option>
+                <option value="Khu Căn hộ Giảng viên">Khu Căn hộ Giảng viên</option>
+            </select>
+
+            <label><b>Phương thức thanh toán:</b></label>
+            <select id="paymentMethod">
+                <option value="cash">Tiền mặt (Thanh toán khi nhận món)</option>
+                <option value="qr_code">Mã QR (Chuyển khoản Ngân hàng)</option>
+            </select>
+
+            <button class="btn" style="width: 100%; margin-top: 15px;" onclick="checkout()">Xác nhận Đặt hàng</button>
+
+            <!-- Khung hiển thị Mã QR -->
+            <div id="qrSection" style="display:none; margin-top: 15px; text-align:center;">
+                <h4>Quét mã QR để thanh toán:</h4>
+                <img id="qrImage" src="" style="width: 100%; max-width: 200px;">
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = "http://127.0.0.1:8000"; // Đổi thành "http://sv25.bcse-vju.com:8000" khi đưa lên VPS
+        let cart = [];
+
+        // Lấy danh sách món từ Backend
+        async function loadProducts() {
+            const search = document.getElementById('searchInput').value;
+            const res = await fetch(`${API_URL}/products?search=${encodeURIComponent(search)}`);
+            const products = await res.json();
+            
+            const grid = document.getElementById('foodGrid');
+            grid.innerHTML = products.map(p => `
+                <div class="food-card">
+                    <img src="${p.image_url || 'https://via.placeholder.com/150'}" alt="${p.name}">
+                    <h4>${p.name}</h4>
+                    <p style="color:red; font-weight:bold;">${parseInt(p.price).toLocaleString()} VNĐ</p>
+                    <button class="btn" onclick="addToCart(${p.id}, '${p.name}', ${p.price})">+ Thêm món</button>
+                </div>
+            `).join('');
+        }
+
+        function addToCart(id, name, price) {
+            const exist = cart.find(item => item.product_id === id);
+            if (exist) { exist.quantity += 1; }
+            else { cart.push({ product_id: id, name: name, price: price, quantity: 1 }); }
+            renderCart();
+        }
+
+        function removeFromCart(id) {
+            cart = cart.filter(item => item.product_id !== id);
+            renderCart();
+        }
+
+        function renderCart() {
+            const container = document.getElementById('cartItems');
+            let total = 0;
+            if (cart.length === 0) {
+                container.innerHTML = "Chưa có món nào trong giỏ.";
+                document.getElementById('totalPrice').innerText = "0 VNĐ";
+                return;
+            }
+            container.innerHTML = cart.map(item => {
+                total += item.price * item.quantity;
+                return `
+                    <div class="cart-item">
+                        <div><b>${item.name}</b> x${item.quantity}</div>
+                        <div>
+                            <span>${(item.price * item.quantity).toLocaleString()}đ</span>
+                            <button class="btn btn-danger" style="padding: 2px 6px;" onclick="removeFromCart(${item.product_id})">X</button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+            document.getElementById('totalPrice').innerText = `${total.toLocaleString()} VNĐ`;
+        }
+
+        async function checkout() {
+            if (cart.length === 0) return alert("Giỏ hàng đang trống!");
+
+            const payload = {
+                customer_id: 1, // ID mẫu khách hàng
+                delivery_area: document.getElementById('deliveryArea').value,
+                payment_method: document.getElementById('paymentMethod').value,
+                items: cart.map(i => ({ product_id: i.product_id, quantity: i.quantity }))
+            };
+
+            const res = await fetch(`${API_URL}/orders`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload)
+            });
+
+            const result = await res.json();
+            if (res.ok) {
+                alert("Đặt hàng thành công!");
+                if (result.qr_code_url) {
+                    document.getElementById('qrSection').style.display = "block";
+                    document.getElementById('qrImage').src = result.qr_code_url;
+                } else {
+                    document.getElementById('qrSection').style.display = "none";
+                }
+                cart = [];
+                renderCart();
+            } else {
+                alert("Lỗi đặt hàng: " + result.detail);
+            }
+        }
+
+        loadProducts();
+    </script>
+</body>
+</html>
