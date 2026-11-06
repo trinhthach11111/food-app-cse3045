@@ -1,12 +1,19 @@
+import os
+import shutil
+from typing import List, Optional
+from fastapi import FastAPI, HTTPException, File, UploadFile, Form
 from fastapi.staticfiles import StaticFiles
-from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import List, Optional
+from passlib.context import CryptContext
+import mysql.connector
+
+# Import hàm kết nối CSDL sẵn có từ backend/db.py của bạn
 from backend.db import get_db_connection
 
 app = FastAPI(title="VJU Food API")
 
+# Cấu hình CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -15,18 +22,20 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- Data Models ---
-class UserRegister(BaseModel):
-    username: str
-    password: str
-    role: str
-    full_name: str
-    phone: str
+# Cấu hình mã hóa mật khẩu bcrypt
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-class UserLogin(BaseModel):
-    username: str
-    password: str
+# Tạo thư mục chứa file tĩnh nếu chưa có
+UPLOAD_DIR = "frontend/uploads"
+IMAGE_DIR = "frontend/images"
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+os.makedirs(IMAGE_DIR, exist_ok=True)
 
+# Mount thư mục tĩnh (Đặt trước route mount trang chủ "/")
+app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
+app.mount("/images", StaticFiles(directory=IMAGE_DIR), name="images")
+
+# --- Data Models Cũ ---
 class OrderItemSchema(BaseModel):
     product_id: int
     quantity: int
@@ -37,42 +46,114 @@ class CreateOrderSchema(BaseModel):
     payment_method: str  # 'cash' hoặc 'qr_code'
     items: List[OrderItemSchema]
 
-# --- Route Trang chủ (Health Check) ---
+
+# --- Route Health Check ---
+@app.get("/health")
+def health_check():
+    return {"status": "ok", "message": "VJU Food API đang hoạt động bình thường!"}
 
 
-# --- API Đăng ký / Đăng nhập ---
+# ==========================================
+# 1. API ĐĂNG KÝ (Hỗ trợ Upload Avatar & Mã hóa BCRYPT)
+# ==========================================
+@app.post("/api/register")
 @app.post("/register")
-def register(user: UserRegister):
+async def register(
+    fullname: str = Form(...),
+    username: str = Form(...),
+    email: str = Form(""),
+    password: str = Form(...),
+    role: str = Form(...),
+    avatar: UploadFile = File(None)
+):
+    if role not in ['customer', 'seller', 'shipper']:
+        raise HTTPException(status_code=400, detail="Vai trò không hợp lệ!")
+
+    # Xử lý lưu ảnh đại diện nếu có tải lên
+    avatar_url = "/uploads/default-avatar.png"
+    if avatar and avatar.filename:
+        file_filename = f"{username}_{avatar.filename}"
+        file_path = os.path.join(UPLOAD_DIR, file_filename)
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(avatar.file, buffer)
+        avatar_url = f"/uploads/{file_filename}"
+
+    # Mã hóa mật khẩu
+    hashed_pwd = pwd_context.hash(password)
+
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
-        query = "INSERT INTO users (username, password_hash, role, full_name, phone) VALUES (%s, %s, %s, %s, %s)"
-        cursor.execute(query, (user.username, user.password, user.role, user.full_name, user.phone))
+        sql = """
+            INSERT INTO users (fullname, username, email, password_hash, role, avatar_url)
+            VALUES (%s, %s, %s, %s, %s, %s)
+        """
+        cursor.execute(sql, (fullname, username, email, hashed_pwd, role, avatar_url))
         conn.commit()
         return {"message": "Đăng ký thành công!"}
+    except mysql.connector.Error:
+        conn.rollback()
+        raise HTTPException(status_code=400, detail="Tên đăng nhập hoặc Email đã tồn tại!")
     except Exception as e:
-        raise HTTPException(status_code=400, detail="Lỗi đăng ký hoặc Username đã tồn tại")
+        conn.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
     finally:
         cursor.close()
         conn.close()
 
+
+# ==========================================
+# 2. API ĐĂNG NHẬP (Xác thực mật khẩu mã hóa & Trả về Avatar/Role)
+# ==========================================
+@app.post("/api/login")
 @app.post("/login")
-def login(user: UserLogin):
+def login(username: str = Form(...), password: str = Form(...)):
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
     try:
-        query = "SELECT id, username, role, full_name FROM users WHERE username = %s AND password_hash = %s"
-        cursor.execute(query, (user.username, user.password))
-        account = cursor.fetchone()
-        if account:
-            return {"message": "Đăng nhập thành công", "user": account}
-        raise HTTPException(status_code=401, detail="Sai tài khoản hoặc mật khẩu")
+        cursor.execute("SELECT * FROM users WHERE username = %s", (username,))
+        user = cursor.fetchone()
+
+        if not user:
+            raise HTTPException(status_code=401, detail="Tài khoản hoặc mật khẩu không chính xác!")
+
+        # Kiểm tra mật khẩu (Tương thích cả bcrypt mới và chuỗi cũ nếu có)
+        is_valid_pwd = False
+        try:
+            is_valid_pwd = pwd_context.verify(password, user['password_hash'])
+        except Exception:
+            is_valid_pwd = (user['password_hash'] == password)
+
+        if not is_valid_pwd:
+            raise HTTPException(status_code=401, detail="Tài khoản hoặc mật khẩu không chính xác!")
+
+        display_name = user.get('fullname') or user.get('full_name') or user.get('username')
+        user_avatar = user.get('avatar_url') or '/uploads/default-avatar.png'
+
+        return {
+            "message": "Đăng nhập thành công!",
+            "user": {
+                "id": user['id'],
+                "username": user['username'],
+                "fullname": display_name,
+                "role": user['role'],
+                "avatar_url": user_avatar
+            },
+            "user_id": user['id'],
+            "fullname": display_name,
+            "role": user['role'],
+            "avatar_url": user_avatar
+        }
     finally:
         cursor.close()
         conn.close()
 
-# --- API Danh sách & Tìm kiếm món ăn ---
+
+# ==========================================
+# 3. API DANH SÁCH & TÌM KIẾM MÓN ĂN (CODE CỦA BẠN)
+# ==========================================
 @app.get("/products")
+@app.get("/api/products")
 def get_products(search: Optional[str] = None):
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
@@ -85,8 +166,13 @@ def get_products(search: Optional[str] = None):
     finally:
         cursor.close()
         conn.close()
-# --- API Tạo đơn hàng & Thanh toán ---
+
+
+# ==========================================
+# 4. API TẠO ĐƠN HÀNG & THANH TOÁN (CODE CỦA BẠN)
+# ==========================================
 @app.post("/orders")
+@app.post("/api/orders")
 def create_order(order: CreateOrderSchema):
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
@@ -127,5 +213,9 @@ def create_order(order: CreateOrderSchema):
     finally:
         cursor.close()
         conn.close()
-        # Khai báo phục vụ các file giao diện HTML/CSS/JS tại đường dẫn gốc "/"
-app.mount("/", StaticFiles(directory="/home/student/thach/food-app-cse3045/frontend", html=True), name="frontend")
+
+
+# ==========================================
+# 5. MOUNT TẤT CẢ FILE GIAO DIỆN HTML/CSS/JS (ĐẶT CUỐI CÙNG)
+# ==========================================
+app.mount("/", StaticFiles(directory="frontend", html=True), name="frontend")

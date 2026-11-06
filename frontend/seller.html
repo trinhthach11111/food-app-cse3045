@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <title>Kênh Quản Lý Cửa Hàng</title>
+</head>
+<body style="font-family: Arial, sans-serif; margin: 0; background: #f9f9f9;">
+  <header style="display: flex; justify-content: space-between; align-items: center; padding: 10px 20px; background: #2196F3; color: white;">
+    <h2>Kênh Bán Hàng (Seller Dashboard)</h2>
+    <div id="userProfile" style="display: flex; align-items: center; gap: 10px;"></div>
+  </header>
+
+  <main style="padding: 20px;">
+    <h3>Quản lý Thực Đơn Quán</h3>
+    <button style="padding: 10px 15px; background: #4CAF50; color: white; border: none; font-weight: bold; cursor: pointer;">+ Thêm món ăn mới</button>
+  </main>
+
+  <script>
+    const user = JSON.parse(localStorage.getItem('user_info'));
+    if (!user || user.role !== 'seller') {
+      alert("Bạn không có quyền truy cập kênh Người Bán Hàng!");
+      window.location.href = '/login.html';
+    } else {
+      document.getElementById('userProfile').innerHTML = `
+        <img src="${user.avatar_url}" style="width: 40px; height: 40px; border-radius: 50%; border: 2px solid white; object-fit: cover;" />
+        <span>Chủ quán: <b>${user.fullname}</b></span>
+        <button onclick="logout()" style="padding: 5px 10px; cursor: pointer;">Đăng xuất</button>
+      `;
+    }
+    function logout() { localStorage.clear(); window.location.href = '/login.html'; }
+  </script>
+</body>
+</html>
