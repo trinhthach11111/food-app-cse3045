@@ -38,9 +38,7 @@ class CreateOrderSchema(BaseModel):
     items: List[OrderItemSchema]
 
 # --- Route Trang chủ (Health Check) ---
-@app.get("/")
-def read_root():
-    return {"status": "online", "message": "VJU Food Backend API is running!"}
+
 
 # --- API Đăng ký / Đăng nhập ---
 @app.post("/register")
@@ -134,4 +132,4 @@ def create_order(order: CreateOrderSchema):
         cursor.close()
         conn.close()
         # Khai báo phục vụ các file giao diện HTML/CSS/JS tại đường dẫn gốc "/"
-app.mount("/", StaticFiles(directory="frontend", html=True), name="frontend")
+app.mount("/", StaticFiles(directory="/home/student/thach/food-app-cse3045/frontend", html=True), name="frontend")
