@@ -1,3 +1,4 @@
+from fastapi.staticfiles import StaticFiles
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -132,3 +133,5 @@ def create_order(order: CreateOrderSchema):
     finally:
         cursor.close()
         conn.close()
+        # Khai báo phục vụ các file giao diện HTML/CSS/JS tại đường dẫn gốc "/"
+app.mount("/", StaticFiles(directory="frontend", html=True), name="frontend")
