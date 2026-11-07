@@ -40,13 +40,28 @@
     document.getElementById('registerForm').onsubmit = async (e) => {
       e.preventDefault();
       const formData = new FormData(e.target);
-      const res = await fetch('/api/register', { method: 'POST', body: formData });
-      const data = await res.json();
-      if (res.ok) {
-        alert("Đăng ký thành công! Chuyển đến trang Đăng nhập.");
-        window.location.href = '/login.html';
-      } else {
-        alert(data.detail || "Đăng ký thất bại");
+
+      try {
+        const res = await fetch('/api/register', { method: 'POST', body: formData });
+        const data = await res.json();
+
+        if (res.ok) {
+          alert("✅ Đăng ký thành công! Tài khoản đã được lưu vào CSDL.\nĐang chuyển sang trang Đăng nhập...");
+          window.location.href = '/login.html';
+        } else {
+          // Hiển thị chi tiết lỗi rõ ràng
+          let errMsg = "Đăng ký thất bại: ";
+          if (typeof data.detail === 'string') {
+            errMsg += data.detail;
+          } else if (Array.isArray(data.detail)) {
+            errMsg += data.detail.map(d => d.msg).join(', ');
+          } else {
+            errMsg += JSON.stringify(data);
+          }
+          alert(errMsg);
+        }
+      } catch (err) {
+        alert("Không thể kết nối đến máy chủ: " + err.message);
       }
     };
   </script>

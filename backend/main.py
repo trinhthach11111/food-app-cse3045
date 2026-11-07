@@ -43,61 +43,75 @@ class CreateOrderSchema(BaseModel):
 @app.get("/health")
 def health_check():
     return {"status": "ok", "message": "VJU Food API đang hoạt động bình thường!"}
-
-# --- API ĐĂNG KÝ (Có Upload Avatar) ---
-@app.post("/api/register")
-# --- API ĐĂNG KÝ (Bắt buộc người dùng nhập Email thật) ---
+# --- API ĐĂNG KÝ (Lưu trực tiếp vào MySQL) ---
 @app.post("/api/register")
 @app.post("/register")
 async def register(
     fullname: str = Form(...),
     username: str = Form(...),
-    email: str = Form(...), # Bắt buộc phải truyền email từ giao diện
+    email: str = Form(...),
     password: str = Form(...),
     role: str = Form(...),
-    avatar: UploadFile = File(None)
+    avatar: Optional[UploadFile] = File(None)
 ):
+    # Chuẩn hóa dữ liệu đầu vào
+    fullname = fullname.strip()
+    username = username.strip()
+    email = email.strip()
+    password = password.strip()
+
+    if not fullname or not username or not email or not password:
+        raise HTTPException(status_code=400, detail="Vui lòng điền đầy đủ tất cả thông tin!")
+
     if role not in ['customer', 'seller', 'shipper']:
         raise HTTPException(status_code=400, detail="Vai trò không hợp lệ!")
 
-    # Bắt buộc người dùng phải điền Email, không tự sinh email giả
-    if not email or not email.strip():
-        raise HTTPException(status_code=400, detail="Vui lòng nhập địa chỉ Email của bạn!")
-
+    # Xử lý tệp Avatar (nếu người dùng chọn ảnh)
     avatar_url = "/uploads/default-avatar.png"
-    if avatar and avatar.filename:
-        file_filename = f"{username}_{avatar.filename}"
-        file_path = os.path.join(UPLOAD_DIR, file_filename)
-        with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(avatar.file, buffer)
-        avatar_url = f"/uploads/{file_filename}"
+    if avatar and avatar.filename and avatar.filename.strip():
+        try:
+            file_filename = f"{username}_{avatar.filename}"
+            file_path = os.path.join(UPLOAD_DIR, file_filename)
+            with open(file_path, "wb") as buffer:
+                shutil.copyfileobj(avatar.file, buffer)
+            avatar_url = f"/uploads/{file_filename}"
+        except Exception:
+            avatar_url = "/uploads/default-avatar.png"
 
+    # Mã hóa mật khẩu bảo mật
     hashed_pwd = pwd_context.hash(password)
 
     conn = get_db_connection()
-    cursor = conn.cursor()
+    cursor = conn.cursor(dictionary=True)
     try:
+        # Kiểm tra trùng lặp username hoặc email trước khi lưu
+        cursor.execute("SELECT id FROM users WHERE username = %s OR email = %s", (username, email))
+        if cursor.fetchone():
+            raise HTTPException(status_code=400, detail="Tên đăng nhập hoặc Email này đã tồn tại trên hệ thống!")
+
+        # Lưu tài khoản mới vào bảng users trong CSDL
         sql = """
             INSERT INTO users (fullname, username, email, password_hash, role, avatar_url)
             VALUES (%s, %s, %s, %s, %s, %s)
         """
         cursor.execute(sql, (fullname, username, email, hashed_pwd, role, avatar_url))
         conn.commit()
-        return {"message": "Đăng ký thành công!"}
-    except mysql.connector.Error:
+        return {"status": "success", "message": "Đăng ký thành công!"}
+
+    except mysql.connector.Error as err:
         conn.rollback()
-        raise HTTPException(status_code=400, detail="Tên đăng nhập hoặc Email đã tồn tại!")
-    except Exception as e:
-        conn.rollback()
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=f"Lỗi CSDL MySQL: {err.msg}")
     finally:
         cursor.close()
         conn.close()
 
-# --- API ĐĂNG NHẬP ---
+# --- API ĐĂNG NHẬP (Đọc dữ liệu từ MySQL) ---
 @app.post("/api/login")
 @app.post("/login")
 def login(username: str = Form(...), password: str = Form(...)):
+    username = username.strip()
+    password = password.strip()
+
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
     try:
@@ -107,6 +121,7 @@ def login(username: str = Form(...), password: str = Form(...)):
         if not user:
             raise HTTPException(status_code=401, detail="Tài khoản hoặc mật khẩu không chính xác!")
 
+        # Xác thực mật khẩu
         is_valid = False
         try:
             is_valid = pwd_context.verify(password, user['password_hash'])
@@ -127,11 +142,7 @@ def login(username: str = Form(...), password: str = Form(...)):
                 "fullname": display_name,
                 "role": user['role'],
                 "avatar_url": user_avatar
-            },
-            "user_id": user['id'],
-            "fullname": display_name,
-            "role": user['role'],
-            "avatar_url": user_avatar
+            }
         }
     finally:
         cursor.close()
