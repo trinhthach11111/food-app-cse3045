@@ -43,7 +43,9 @@ class CreateOrderSchema(BaseModel):
 @app.get("/health")
 def health_check():
     return {"status": "ok", "message": "VJU Food API đang hoạt động bình thường!"}
-# --- API ĐĂNG KÝ (Lưu trực tiếp vào MySQL) ---
+
+
+# --- API ĐĂNG KÝ (Bắt lỗi trùng tài khoản & xử lý avatar an toàn) ---
 @app.post("/api/register")
 @app.post("/register")
 async def register(
@@ -54,21 +56,20 @@ async def register(
     role: str = Form(...),
     avatar: Optional[UploadFile] = File(None)
 ):
-    # Chuẩn hóa dữ liệu đầu vào
     fullname = fullname.strip()
     username = username.strip()
     email = email.strip()
     password = password.strip()
 
     if not fullname or not username or not email or not password:
-        raise HTTPException(status_code=400, detail="Vui lòng điền đầy đủ tất cả thông tin!")
+        raise HTTPException(status_code=400, detail="Vui lòng nhập đầy đủ tất cả thông tin!")
 
     if role not in ['customer', 'seller', 'shipper']:
         raise HTTPException(status_code=400, detail="Vai trò không hợp lệ!")
 
-    # Xử lý tệp Avatar (nếu người dùng chọn ảnh)
+    # Xử lý Avatar an toàn tuyệt đối
     avatar_url = "/uploads/default-avatar.png"
-    if avatar and avatar.filename and avatar.filename.strip():
+    if avatar is not None and hasattr(avatar, "filename") and avatar.filename:
         try:
             file_filename = f"{username}_{avatar.filename}"
             file_path = os.path.join(UPLOAD_DIR, file_filename)
@@ -78,34 +79,40 @@ async def register(
         except Exception:
             avatar_url = "/uploads/default-avatar.png"
 
-    # Mã hóa mật khẩu bảo mật
     hashed_pwd = pwd_context.hash(password)
 
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
     try:
-        # Kiểm tra trùng lặp username hoặc email trước khi lưu
-        cursor.execute("SELECT id FROM users WHERE username = %s OR email = %s", (username, email))
-        if cursor.fetchone():
-            raise HTTPException(status_code=400, detail="Tên đăng nhập hoặc Email này đã tồn tại trên hệ thống!")
+        # Kiểm tra trùng lặp Username hoặc Email trước khi lưu vào CSDL
+        cursor.execute("SELECT username, email FROM users WHERE username = %s OR email = %s", (username, email))
+        existing = cursor.fetchone()
+        if existing:
+            if existing['username'] == username:
+                raise HTTPException(status_code=400, detail=f"Tên đăng nhập '{username}' đã tồn tại! Vui lòng chọn tên khác hoặc dùng trang Đăng Nhập.")
+            else:
+                raise HTTPException(status_code=400, detail=f"Email '{email}' đã được đăng ký!")
 
-        # Lưu tài khoản mới vào bảng users trong CSDL
         sql = """
             INSERT INTO users (fullname, username, email, password_hash, role, avatar_url)
             VALUES (%s, %s, %s, %s, %s, %s)
         """
         cursor.execute(sql, (fullname, username, email, hashed_pwd, role, avatar_url))
         conn.commit()
-        return {"status": "success", "message": "Đăng ký thành công!"}
+        return {"message": "Đăng ký thành công!"}
 
-    except mysql.connector.Error as err:
+    except HTTPException:
         conn.rollback()
-        raise HTTPException(status_code=400, detail=f"Lỗi CSDL MySQL: {err.msg}")
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=400, detail=f"Lỗi CSDL: {str(e)}")
     finally:
         cursor.close()
         conn.close()
 
-# --- API ĐĂNG NHẬP (Đọc dữ liệu từ MySQL) ---
+
+# --- API ĐĂNG NHẬP ---
 @app.post("/api/login")
 @app.post("/login")
 def login(username: str = Form(...), password: str = Form(...)):
@@ -121,7 +128,6 @@ def login(username: str = Form(...), password: str = Form(...)):
         if not user:
             raise HTTPException(status_code=401, detail="Tài khoản hoặc mật khẩu không chính xác!")
 
-        # Xác thực mật khẩu
         is_valid = False
         try:
             is_valid = pwd_context.verify(password, user['password_hash'])
