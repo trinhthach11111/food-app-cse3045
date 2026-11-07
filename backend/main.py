@@ -82,7 +82,7 @@ class CreateOrderSchema(BaseModel):
 def health_check():
     return {"status": "ok", "message": "VJU Food API đang hoạt động bình thường!"}
 
-# --- API ĐĂNG KÝ (Lưu vĩnh viễn vào CSDL MySQL) ---
+# --- API ĐĂNG KÝ (Xử lý an toàn khi KHÔNG tải ảnh Avatar) ---
 @app.post("/api/register")
 @app.post("/register")
 async def register(
@@ -93,57 +93,65 @@ async def register(
     role: str = Form(...),
     avatar: Optional[UploadFile] = File(None)
 ):
-    fullname = fullname.strip()
-    username = username.strip()
-    email = email.strip()
-    password = password.strip()
-
-    if not fullname or not username or not email or not password:
-        raise HTTPException(status_code=400, detail="Vui lòng nhập đầy đủ tất cả thông tin!")
-
-    if role not in ['customer', 'seller', 'shipper']:
-        raise HTTPException(status_code=400, detail="Vai trò không hợp lệ!")
-
-    avatar_url = "/uploads/default-avatar.png"
-    if avatar and hasattr(avatar, "filename") and avatar.filename and avatar.filename.strip():
-        try:
-            file_filename = f"{username}_{avatar.filename}"
-            file_path = os.path.join(UPLOAD_DIR, file_filename)
-            with open(file_path, "wb") as buffer:
-                shutil.copyfileobj(avatar.file, buffer)
-            avatar_url = f"/uploads/{file_filename}"
-        except Exception:
-            avatar_url = "/uploads/default-avatar.png"
-
-    hashed_pwd = pwd_context.hash(password)
-
-    conn = get_db_connection()
-    cursor = conn.cursor(dictionary=True)
     try:
-        cursor.execute("SELECT username, email FROM users WHERE username = %s OR email = %s", (username, email))
-        existing = cursor.fetchone()
-        if existing:
-            if existing['username'] == username:
-                raise HTTPException(status_code=400, detail=f"Tên đăng nhập '{username}' đã tồn tại! Vui lòng chọn tên khác.")
-            else:
-                raise HTTPException(status_code=400, detail=f"Email '{email}' đã được đăng ký!")
+        fullname = fullname.strip()
+        username = username.strip()
+        email = email.strip()
+        password = password.strip()
 
-        sql = """
-            INSERT INTO users (fullname, username, email, password_hash, role, avatar_url)
-            VALUES (%s, %s, %s, %s, %s, %s)
-        """
-        cursor.execute(sql, (fullname, username, email, hashed_pwd, role, avatar_url))
-        conn.commit()
-        return {"message": "Đăng ký thành công!"}
-    except HTTPException:
-        conn.rollback()
-        raise
+        if not fullname or not username or not email or not password:
+            raise HTTPException(status_code=400, detail="Vui lòng điền đầy đủ tất cả thông tin!")
+
+        if role not in ['customer', 'seller', 'shipper']:
+            raise HTTPException(status_code=400, detail="Vai trò không hợp lệ!")
+
+        # Ảnh mặc định nếu người dùng không chọn tệp
+        avatar_url = "/uploads/default-avatar.png"
+
+        # Kiểm tra và xử lý nếu có ảnh được chọn thực sự
+        if avatar and hasattr(avatar, "filename") and avatar.filename and avatar.filename.strip():
+            try:
+                contents = await avatar.read()
+                if len(contents) > 0:
+                    file_filename = f"{username}_{os.path.basename(avatar.filename.strip())}"
+                    file_path = os.path.join(UPLOAD_DIR, file_filename)
+                    with open(file_path, "wb") as f:
+                        f.write(contents)
+                    avatar_url = f"/uploads/{file_filename}"
+            except Exception as img_err:
+                print(f"Lỗi lưu file ảnh: {img_err}")
+                avatar_url = "/uploads/default-avatar.png"
+
+        hashed_pwd = pwd_context.hash(password)
+
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        try:
+            # Kiểm tra trùng tên đăng nhập hoặc email
+            cursor.execute("SELECT username, email FROM users WHERE username = %s OR email = %s", (username, email))
+            existing = cursor.fetchone()
+            if existing:
+                if existing['username'] == username:
+                    raise HTTPException(status_code=400, detail=f"Tên đăng nhập '{username}' đã tồn tại! Vui lòng chọn tên khác.")
+                else:
+                    raise HTTPException(status_code=400, detail=f"Email '{email}' đã được sử dụng!")
+
+            sql = """
+                INSERT INTO users (fullname, username, email, password_hash, role, avatar_url)
+                VALUES (%s, %s, %s, %s, %s, %s)
+            """
+            cursor.execute(sql, (fullname, username, email, hashed_pwd, role, avatar_url))
+            conn.commit()
+            return {"message": "Đăng ký thành công!"}
+
+        finally:
+            cursor.close()
+            conn.close()
+
+    except HTTPException as he:
+        raise he
     except Exception as e:
-        conn.rollback()
-        raise HTTPException(status_code=400, detail=f"Lỗi CSDL: {str(e)}")
-    finally:
-        cursor.close()
-        conn.close()
+        raise HTTPException(status_code=500, detail=f"Lỗi Server: {str(e)}")
 
 # --- API ĐĂNG NHẬP (BẢO HIỂM 100% VÀO ĐƯỢC) ---
 @app.post("/api/login")

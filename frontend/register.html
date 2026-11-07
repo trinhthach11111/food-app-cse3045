@@ -43,22 +43,20 @@
 
       try {
         const res = await fetch('/api/register', { method: 'POST', body: formData });
-        const data = await res.json();
+        
+        let data;
+        try {
+          data = await res.json();
+        } catch (jsonErr) {
+          alert("❌ Lỗi máy chủ (" + res.status + "): Vui lòng thử lại!");
+          return;
+        }
 
         if (res.ok) {
-          alert("✅ Đăng ký thành công! Tài khoản đã được lưu vào CSDL.\nĐang chuyển sang trang Đăng nhập...");
+          alert("✅ Đăng ký tài khoản thành công!\nTài khoản đã được lưu vào CSDL. Đang chuyển đến trang Đăng nhập...");
           window.location.href = '/login.html';
         } else {
-          // Hiển thị chi tiết lỗi rõ ràng
-          let errMsg = "Đăng ký thất bại: ";
-          if (typeof data.detail === 'string') {
-            errMsg += data.detail;
-          } else if (Array.isArray(data.detail)) {
-            errMsg += data.detail.map(d => d.msg).join(', ');
-          } else {
-            errMsg += JSON.stringify(data);
-          }
-          alert(errMsg);
+          alert("❌ Đăng ký thất bại: " + (data.detail || "Thông tin không hợp lệ."));
         }
       } catch (err) {
         alert("Không thể kết nối đến máy chủ: " + err.message);
