@@ -48,14 +48,14 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     except Exception:
         return False
 
-# --- TỰ ĐỘNG NẠP CSDL KHI KHỞI ĐỘNG (BỌC TRY-EXCEPT AN TOÀN CHỐNG SẬP APP) ---
+# --- TỰ ĐỘNG NẠP VÀ TẠO ĐỦ TẤT CẢ BẢNG CSDL KHI FASTAPI KHỞI ĐỘNG ---
 @app.on_event("startup")
 def startup_db_check():
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        # 1. Khởi tạo Bảng users
+        # 1. Bảng users
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS users (
             id INT AUTO_INCREMENT PRIMARY KEY,
@@ -82,7 +82,7 @@ def startup_db_check():
                 ON DUPLICATE KEY UPDATE password_hash=%s
             """, (u[0], u[1], u[2], u[3], u[4], u[3]))
 
-        # 2. Khởi tạo Bảng products
+        # 2. Bảng products
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS products (
             id INT AUTO_INCREMENT PRIMARY KEY,
@@ -110,12 +110,36 @@ def startup_db_check():
             for p in sample_products:
                 cursor.execute("INSERT INTO products (name, price, description, image_url) VALUES (%s, %s, %s, %s)", p)
 
+        # 3. Bảng orders (Đơn hàng)
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS orders (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            customer_id INT NOT NULL,
+            delivery_area VARCHAR(255) NOT NULL,
+            total_amount DECIMAL(10,2) NOT NULL,
+            payment_method VARCHAR(50) NOT NULL,
+            status ENUM('pending', 'delivering', 'completed', 'cancelled') DEFAULT 'pending',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """)
+
+        # 4. Bảng order_items (Chi tiết món trong đơn)
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS order_items (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            order_id INT NOT NULL,
+            product_id INT NOT NULL,
+            quantity INT NOT NULL,
+            FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE
+        )
+        """)
+
         conn.commit()
         cursor.close()
         conn.close()
-        print(">>> [SUCCESS] CSDL, Bảng users & Thực đơn đã sẵn sàng!")
+        print(">>> [SUCCESS] CSDL (Users, Products, Orders, OrderItems) đã sẵn sàng!")
     except Exception as e:
-        print(f">>> [WARNING] Khởi tạo CSDL gặp lỗi nhẹ nhưng App vẫn chạy bình thường: {e}")
+        print(f">>> [WARNING] Khởi tạo CSDL: {e}")
 
 class OrderItemSchema(BaseModel):
     product_id: int
@@ -307,15 +331,21 @@ def get_products(search: Optional[str] = None):
         cursor.close()
         conn.close()
 
-# --- API TẠO ĐƠN HÀNG ---
+# --- API TẠO ĐƠN HÀNG (ĐÃ THÊM VALIDATE SỐ LƯỢNG MÓN) ---
 @app.post("/orders")
 @app.post("/api/orders")
 def create_order(order: CreateOrderSchema):
+    if not order.items:
+        raise HTTPException(status_code=400, detail="Giỏ hàng trống!")
+
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
     try:
         total_amount = 0
         for item in order.items:
+            if item.quantity <= 0 or item.quantity > 100:
+                raise HTTPException(status_code=400, detail=f"Số lượng món không hợp lệ (từ 1 đến 100)!")
+
             cursor.execute("SELECT price FROM products WHERE id = %s", (item.product_id,))
             p = cursor.fetchone()
             if not p:
