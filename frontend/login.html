@@ -2,46 +2,76 @@
 <html lang="vi">
 <head>
   <meta charset="UTF-8">
-  <title>Đăng nhập</title>
+  <title>Đăng nhập - VJU Food</title>
   <style>
-    body { font-family: Arial, sans-serif; display: flex; justify-content: center; padding-top: 50px; background: #f4f4f4; }
-    .card { background: white; padding: 30px; border-radius: 8px; width: 320px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-    input, button { width: 100%; margin-bottom: 15px; padding: 10px; box-sizing: border-box; }
-    button { background: #4caf50; color: white; border: none; font-weight: bold; cursor: pointer; }
+    body { font-family: 'Segoe UI', Arial, sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; background: #f4f6f9; }
+    .card { background: white; padding: 30px; border-radius: 10px; width: 360px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
+    h2 { margin-top: 0; color: #333; text-align: center; }
+    input, button { width: 100%; margin-bottom: 15px; padding: 12px; box-sizing: border-box; border-radius: 6px; border: 1px solid #ccc; }
+    button.btn-submit { background: #4caf50; color: white; border: none; font-weight: bold; cursor: pointer; font-size: 16px; }
+    .test-box { background: #eef7ff; border: 1px dashed #2196f3; padding: 12px; border-radius: 6px; margin-bottom: 15px; }
+    .test-btn { background: #2196f3; color: white; border: none; padding: 6px 10px; border-radius: 4px; font-size: 12px; cursor: pointer; margin-right: 4px; margin-top: 5px; width: auto; display: inline-block; }
   </style>
 </head>
 <body>
   <div class="card">
-    <h2>Đăng nhập</h2>
+    <h2>Đăng Nhập</h2>
+
+    <div class="test-box">
+      <small style="font-weight: bold; color: #1976d2;">⚡ Đăng nhập nhanh (Tài khoản Test):</small><br/>
+      <button class="test-btn" onclick="quickLogin('customer1', '123456')">Khách hàng</button>
+      <button class="test-btn" style="background:#ff9800" onclick="quickLogin('seller1', '123456')">Chủ quán</button>
+      <button class="test-btn" style="background:#9c27b0" onclick="quickLogin('shipper1', '123456')">Shipper</button>
+    </div>
+
     <form id="loginForm">
-      <input type="text" name="username" placeholder="Tên đăng nhập" required />
-      <input type="password" name="password" placeholder="Mật khẩu" required />
-      <button type="submit">Đăng nhập</button>
+      <input type="text" id="username" name="username" placeholder="Tên đăng nhập" required />
+      <input type="password" id="password" name="password" placeholder="Mật khẩu" required />
+      <button type="submit" class="btn-submit">Đăng nhập</button>
     </form>
-    <p>Chưa có tài khoản? <a href="/register.html">Đăng ký</a></p>
+
+    <p style="text-align: center; margin-bottom: 0;">Chưa có tài khoản? <a href="/register.html" style="color:#ff5722; font-weight:bold;">Đăng ký ngay</a></p>
   </div>
 
   <script>
-    document.getElementById('loginForm').onsubmit = async (e) => {
-      e.preventDefault();
-      const formData = new FormData(e.target);
-      const res = await fetch('/api/login', { method: 'POST', body: formData });
-      const data = await res.json();
+    async function doLogin(username, password) {
+      const formData = new FormData();
+      formData.append('username', username);
+      formData.append('password', password);
 
-      if (res.ok) {
-        const user = data.user || data;
-        localStorage.setItem('user_info', JSON.stringify(user));
-        if (user.role === 'customer') {
-          window.location.href = '/index.html';
-        } else if (user.role === 'seller') {
-          window.location.href = '/seller.html';
-        } else if (user.role === 'shipper') {
-          window.location.href = '/shipper.html';
+      try {
+        const res = await fetch('/api/login', { method: 'POST', body: formData });
+        const data = await res.json();
+
+        if (res.ok) {
+          const user = data.user || data;
+          localStorage.setItem('user_info', JSON.stringify(user));
+
+          if (user.role === 'customer') {
+            window.location.href = '/index.html';
+          } else if (user.role === 'seller') {
+            window.location.href = '/seller.html';
+          } else if (user.role === 'shipper') {
+            window.location.href = '/shipper.html';
+          }
+        } else {
+          alert(data.detail || "Đăng nhập thất bại");
         }
-      } else {
-        alert(data.detail || "Sai tên đăng nhập hoặc mật khẩu");
+      } catch (e) {
+        alert("Lỗi kết nối máy chủ");
       }
+    }
+
+    document.getElementById('loginForm').onsubmit = (e) => {
+      e.preventDefault();
+      doLogin(document.getElementById('username').value, document.getElementById('password').value);
     };
+
+    function quickLogin(u, p) {
+      document.getElementById('username').value = u;
+      document.getElementById('password').value = p;
+      doLogin(u, p);
+    }
   </script>
 </body>
 </html>

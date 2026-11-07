@@ -8,12 +8,10 @@ from pydantic import BaseModel
 from passlib.context import CryptContext
 import mysql.connector
 
-# Import hàm kết nối CSDL sẵn có từ backend/db.py của bạn
 from backend.db import get_db_connection
 
 app = FastAPI(title="VJU Food API")
 
-# Cấu hình CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -22,20 +20,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Cấu hình mã hóa mật khẩu bcrypt
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-# Tạo thư mục chứa file tĩnh nếu chưa có
 UPLOAD_DIR = "frontend/uploads"
 IMAGE_DIR = "frontend/images"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(IMAGE_DIR, exist_ok=True)
 
-# Mount thư mục tĩnh (Đặt trước route mount trang chủ "/")
 app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 app.mount("/images", StaticFiles(directory=IMAGE_DIR), name="images")
 
-# --- Data Models Cũ ---
 class OrderItemSchema(BaseModel):
     product_id: int
     quantity: int
@@ -43,19 +37,14 @@ class OrderItemSchema(BaseModel):
 class CreateOrderSchema(BaseModel):
     customer_id: int
     delivery_area: str
-    payment_method: str  # 'cash' hoặc 'qr_code'
+    payment_method: str
     items: List[OrderItemSchema]
 
-
-# --- Route Health Check ---
 @app.get("/health")
 def health_check():
     return {"status": "ok", "message": "VJU Food API đang hoạt động bình thường!"}
 
-
-# ==========================================
-# 1. API ĐĂNG KÝ (Hỗ trợ Upload Avatar & Mã hóa BCRYPT)
-# ==========================================
+# --- API ĐĂNG KÝ (Có Upload Avatar) ---
 @app.post("/api/register")
 @app.post("/register")
 async def register(
@@ -69,7 +58,6 @@ async def register(
     if role not in ['customer', 'seller', 'shipper']:
         raise HTTPException(status_code=400, detail="Vai trò không hợp lệ!")
 
-    # Xử lý lưu ảnh đại diện nếu có tải lên
     avatar_url = "/uploads/default-avatar.png"
     if avatar and avatar.filename:
         file_filename = f"{username}_{avatar.filename}"
@@ -78,7 +66,6 @@ async def register(
             shutil.copyfileobj(avatar.file, buffer)
         avatar_url = f"/uploads/{file_filename}"
 
-    # Mã hóa mật khẩu
     hashed_pwd = pwd_context.hash(password)
 
     conn = get_db_connection()
@@ -101,10 +88,7 @@ async def register(
         cursor.close()
         conn.close()
 
-
-# ==========================================
-# 2. API ĐĂNG NHẬP (Xác thực mật khẩu mã hóa & Trả về Avatar/Role)
-# ==========================================
+# --- API ĐĂNG NHẬP ---
 @app.post("/api/login")
 @app.post("/login")
 def login(username: str = Form(...), password: str = Form(...)):
@@ -117,17 +101,16 @@ def login(username: str = Form(...), password: str = Form(...)):
         if not user:
             raise HTTPException(status_code=401, detail="Tài khoản hoặc mật khẩu không chính xác!")
 
-        # Kiểm tra mật khẩu (Tương thích cả bcrypt mới và chuỗi cũ nếu có)
-        is_valid_pwd = False
+        is_valid = False
         try:
-            is_valid_pwd = pwd_context.verify(password, user['password_hash'])
+            is_valid = pwd_context.verify(password, user['password_hash'])
         except Exception:
-            is_valid_pwd = (user['password_hash'] == password)
+            is_valid = (user['password_hash'] == password)
 
-        if not is_valid_pwd:
+        if not is_valid:
             raise HTTPException(status_code=401, detail="Tài khoản hoặc mật khẩu không chính xác!")
 
-        display_name = user.get('fullname') or user.get('full_name') or user.get('username')
+        display_name = user.get('fullname') or user.get('username')
         user_avatar = user.get('avatar_url') or '/uploads/default-avatar.png'
 
         return {
@@ -148,10 +131,7 @@ def login(username: str = Form(...), password: str = Form(...)):
         cursor.close()
         conn.close()
 
-
-# ==========================================
-# 3. API DANH SÁCH & TÌM KIẾM MÓN ĂN (CODE CỦA BẠN)
-# ==========================================
+# --- API LẤY DANH SÁCH MÓN ĂN ---
 @app.get("/products")
 @app.get("/api/products")
 def get_products(search: Optional[str] = None):
@@ -167,17 +147,13 @@ def get_products(search: Optional[str] = None):
         cursor.close()
         conn.close()
 
-
-# ==========================================
-# 4. API TẠO ĐƠN HÀNG & THANH TOÁN (CODE CỦA BẠN)
-# ==========================================
+# --- API TẠO ĐƠN HÀNG ---
 @app.post("/orders")
 @app.post("/api/orders")
 def create_order(order: CreateOrderSchema):
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
     try:
-        # Tính tổng tiền từ CSDL
         total_amount = 0
         for item in order.items:
             cursor.execute("SELECT price FROM products WHERE id = %s", (item.product_id,))
@@ -186,12 +162,10 @@ def create_order(order: CreateOrderSchema):
                 raise HTTPException(status_code=404, detail=f"Món ID {item.product_id} không tồn tại")
             total_amount += float(p['price']) * item.quantity
 
-        # Tạo bản ghi đơn hàng
         order_sql = "INSERT INTO orders (customer_id, delivery_area, total_amount, payment_method) VALUES (%s, %s, %s, %s)"
         cursor.execute(order_sql, (order.customer_id, order.delivery_area, total_amount, order.payment_method))
         order_id = cursor.lastrowid
 
-        # Thêm chi tiết món ăn
         for item in order.items:
             item_sql = "INSERT INTO order_items (order_id, product_id, quantity) VALUES (%s, %s, %s)"
             cursor.execute(item_sql, (order_id, item.product_id, item.quantity))
@@ -214,8 +188,4 @@ def create_order(order: CreateOrderSchema):
         cursor.close()
         conn.close()
 
-
-# ==========================================
-# 5. MOUNT TẤT CẢ FILE GIAO DIỆN HTML/CSS/JS (ĐẶT CUỐI CÙNG)
-# ==========================================
 app.mount("/", StaticFiles(directory="frontend", html=True), name="frontend")
