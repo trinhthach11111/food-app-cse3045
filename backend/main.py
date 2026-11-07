@@ -48,12 +48,14 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     except Exception:
         return False
 
-# --- TỰ ĐỘNG TẠO BẢNG & TÀI KHOẢN TEST KHI FASTAPI KHỞI ĐỘNG ---
+# --- TỰ ĐỘNG KHỞI TẠO CSDL, TÀI KHOẢN TEST & THỰC ĐƠN KHI FASTAPI KHỞI ĐỘNG ---
 @app.on_event("startup")
 def startup_db_check():
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
+        
+        # 1. Bảng users
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS users (
             id INT AUTO_INCREMENT PRIMARY KEY,
@@ -79,22 +81,39 @@ def startup_db_check():
                 VALUES (%s, %s, %s, %s, %s)
                 ON DUPLICATE KEY UPDATE password_hash=%s
             """, (u[0], u[1], u[2], u[3], u[4], u[3]))
+
+        # 2. Bảng products
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS products (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            name VARCHAR(100) NOT NULL,
+            price DECIMAL(10,2) NOT NULL,
+            description TEXT,
+            image_url VARCHAR(255),
+            is_available BOOLEAN DEFAULT TRUE,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """)
+
+        cursor.execute("SELECT COUNT(*) FROM products")
+        count = cursor.fetchone()[0]
+        if count == 0:
+            sample_products = [
+                ('Phở Bò Đặc Biệt', 45000, 'Phở bò tái nạm nước dùng đậm đà', '/images/pho_bo.jpg'),
+                ('Cơm Tấm Sườn Bì Chả', 40000, 'Cơm tấm sườn nướng mật ong thơm ngon', '/images/com_tam.jpg'),
+                ('Bún Chả Hà Nội', 45000, 'Bún chả nướng than hoa chuẩn vị', '/images/bun_cha.jpg'),
+                ('Bánh Mỳ Kẹp Thịt', 25000, 'Bánh mỳ giòn rụm đầy đặn nhân', '/images/banh_my.jpg'),
+                ('Trà Sữa Trân Châu', 30000, 'Trà sữa truyền thống trân châu đường đen', '/images/tra_sua.jpg')
+            ]
+            for p in sample_products:
+                cursor.execute("INSERT INTO products (name, price, description, image_url) VALUES (%s, %s, %s, %s)", p)
+
         conn.commit()
         cursor.close()
         conn.close()
-        print(">>> [SUCCESS] Bảng users & 3 tài khoản TEST đã sẵn sàng!")
+        print(">>> [SUCCESS] CSDL, Bảng users & Thực đơn món ăn đã sẵn sàng!")
     except Exception as e:
         print(f">>> [WARNING] Khởi tạo CSDL: {e}")
-
-class OrderItemSchema(BaseModel):
-    product_id: int
-    quantity: int
-
-class CreateOrderSchema(BaseModel):
-    customer_id: int
-    delivery_area: str
-    payment_method: str
-    items: List[OrderItemSchema]
 
 @app.get("/health")
 def health_check():
