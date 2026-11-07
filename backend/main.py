@@ -46,17 +46,23 @@ def health_check():
 
 # --- API ĐĂNG KÝ (Có Upload Avatar) ---
 @app.post("/api/register")
+# --- API ĐĂNG KÝ (Bắt buộc người dùng nhập Email thật) ---
+@app.post("/api/register")
 @app.post("/register")
 async def register(
     fullname: str = Form(...),
     username: str = Form(...),
-    email: str = Form(""),
+    email: str = Form(...), # Bắt buộc phải truyền email từ giao diện
     password: str = Form(...),
     role: str = Form(...),
     avatar: UploadFile = File(None)
 ):
     if role not in ['customer', 'seller', 'shipper']:
         raise HTTPException(status_code=400, detail="Vai trò không hợp lệ!")
+
+    # Bắt buộc người dùng phải điền Email, không tự sinh email giả
+    if not email or not email.strip():
+        raise HTTPException(status_code=400, detail="Vui lòng nhập địa chỉ Email của bạn!")
 
     avatar_url = "/uploads/default-avatar.png"
     if avatar and avatar.filename:
