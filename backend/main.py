@@ -31,9 +31,9 @@ os.makedirs(IMAGE_DIR, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 app.mount("/images", StaticFiles(directory=IMAGE_DIR), name="images")
 
-# --- MÃ HÓA AN TOÀN TUYỆT ĐỐI (SHA-256 PRE-HASH CHỐNG LỖI 72 BYTES BCRYPT) ---
+# --- MÃ HÓA AN TOÀN SHA-256 PRE-HASH ---
 def hash_password(password: str) -> str:
-    sha_str = hashlib.sha256(password.encode('utf-8')).hexdigest() # Chuỗi 64 ký tự hex (luôn < 72 bytes)
+    sha_str = hashlib.sha256(password.encode('utf-8')).hexdigest()
     try:
         return pwd_context.hash(sha_str)
     except Exception:
@@ -48,14 +48,14 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     except Exception:
         return False
 
-# --- TỰ ĐỘNG KHỞI TẠO CSDL, TÀI KHOẢN TEST & THỰC ĐƠN KHI FASTAPI KHỞI ĐỘNG ---
+# --- TỰ ĐỘNG NẠP CSDL KHI KHỞI ĐỘNG (BỌC TRY-EXCEPT AN TOÀN CHỐNG SẬP APP) ---
 @app.on_event("startup")
 def startup_db_check():
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        # 1. Bảng users
+        # 1. Khởi tạo Bảng users
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS users (
             id INT AUTO_INCREMENT PRIMARY KEY,
@@ -82,7 +82,7 @@ def startup_db_check():
                 ON DUPLICATE KEY UPDATE password_hash=%s
             """, (u[0], u[1], u[2], u[3], u[4], u[3]))
 
-        # 2. Bảng products
+        # 2. Khởi tạo Bảng products
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS products (
             id INT AUTO_INCREMENT PRIMARY KEY,
@@ -96,7 +96,9 @@ def startup_db_check():
         """)
 
         cursor.execute("SELECT COUNT(*) FROM products")
-        count = cursor.fetchone()[0]
+        res = cursor.fetchone()
+        count = res[0] if res else 0
+
         if count == 0:
             sample_products = [
                 ('Phở Bò Đặc Biệt', 45000, 'Phở bò tái nạm nước dùng đậm đà', '/images/pho_bo.jpg'),
@@ -111,15 +113,25 @@ def startup_db_check():
         conn.commit()
         cursor.close()
         conn.close()
-        print(">>> [SUCCESS] CSDL, Bảng users & Thực đơn món ăn đã sẵn sàng!")
+        print(">>> [SUCCESS] CSDL, Bảng users & Thực đơn đã sẵn sàng!")
     except Exception as e:
-        print(f">>> [WARNING] Khởi tạo CSDL: {e}")
+        print(f">>> [WARNING] Khởi tạo CSDL gặp lỗi nhẹ nhưng App vẫn chạy bình thường: {e}")
+
+class OrderItemSchema(BaseModel):
+    product_id: int
+    quantity: int
+
+class CreateOrderSchema(BaseModel):
+    customer_id: int
+    delivery_area: str
+    payment_method: str
+    items: List[OrderItemSchema]
 
 @app.get("/health")
 def health_check():
     return {"status": "ok", "message": "VJU Food API đang hoạt động bình thường!"}
 
-# --- API ĐĂNG KÝ (KHÔNG BAO GIỜ BẮN LỖI 500) ---
+# --- API ĐĂNG KÝ ---
 @app.post("/api/register")
 @app.post("/register")
 async def register(
@@ -185,7 +197,7 @@ async def register(
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Lỗi xử lý: {str(e)}")
 
-# --- API ĐĂNG NHẬP (BẢO HIỂM 100%) ---
+# --- API ĐĂNG NHẬP ---
 @app.post("/api/login")
 @app.post("/login")
 def login(username: str = Form(...), password: str = Form(...)):
@@ -235,7 +247,7 @@ def login(username: str = Form(...), password: str = Form(...)):
         cursor.close()
         conn.close()
 
-# --- API THÊM MÓ N ĂN MỚI DÀNH CHO CHỦ QUÁN ---
+# --- API THÊM MÓN ĂN MỚI ---
 @app.post("/api/products")
 @app.post("/products")
 async def add_product(
@@ -275,6 +287,22 @@ async def add_product(
     except Exception as e:
         conn.rollback()
         raise HTTPException(status_code=500, detail=f"Lỗi CSDL: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()
+
+# --- API LẤY DANH SÁCH MÓN ĂN ---
+@app.get("/products")
+@app.get("/api/products")
+def get_products(search: Optional[str] = None):
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+    try:
+        if search and search.strip():
+            cursor.execute("SELECT * FROM products WHERE name LIKE %s AND is_available = TRUE", (f"%{search.strip()}%",))
+        else:
+            cursor.execute("SELECT * FROM products WHERE is_available = TRUE")
+        return cursor.fetchall()
     finally:
         cursor.close()
         conn.close()
