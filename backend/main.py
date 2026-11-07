@@ -216,18 +216,46 @@ def login(username: str = Form(...), password: str = Form(...)):
         cursor.close()
         conn.close()
 
-# --- API LẤY DANH SÁCH MÓN ĂN ---
-@app.get("/products")
-@app.get("/api/products")
-def get_products(search: Optional[str] = None):
+# --- API THÊM MÓ N ĂN MỚI DÀNH CHO CHỦ QUÁN ---
+@app.post("/api/products")
+@app.post("/products")
+async def add_product(
+    name: str = Form(...),
+    price: float = Form(...),
+    description: str = Form(""),
+    image: Optional[UploadFile] = File(None)
+):
+    name = name.strip()
+    if not name or price <= 0:
+        raise HTTPException(status_code=400, detail="Tên món ăn và Giá tiền không hợp lệ!")
+
+    image_url = "/images/default-food.jpg"
+    if image and hasattr(image, "filename") and image.filename and image.filename.strip():
+        try:
+            contents = await image.read()
+            if len(contents) > 0:
+                safe_filename = f"prod_{name.replace(' ', '_')}_{os.path.basename(image.filename.strip())}"
+                file_path = os.path.join(IMAGE_DIR, safe_filename)
+                with open(file_path, "wb") as f:
+                    f.write(contents)
+                image_url = f"/images/{safe_filename}"
+        except Exception as img_err:
+            print(f"Lỗi lưu ảnh món ăn: {img_err}")
+            image_url = "/images/default-food.jpg"
+
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
     try:
-        if search and search.strip():
-            cursor.execute("SELECT * FROM products WHERE name LIKE %s AND is_available = TRUE", (f"%{search.strip()}%",))
-        else:
-            cursor.execute("SELECT * FROM products WHERE is_available = TRUE")
-        return cursor.fetchall()
+        sql = """
+            INSERT INTO products (name, price, description, image_url, is_available)
+            VALUES (%s, %s, %s, %s, TRUE)
+        """
+        cursor.execute(sql, (name, price, description, image_url))
+        conn.commit()
+        return {"message": "Thêm món ăn mới thành công!", "product_id": cursor.lastrowid}
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Lỗi CSDL: {str(e)}")
     finally:
         cursor.close()
         conn.close()
