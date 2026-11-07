@@ -82,7 +82,7 @@ class CreateOrderSchema(BaseModel):
 def health_check():
     return {"status": "ok", "message": "VJU Food API đang hoạt động bình thường!"}
 
-# --- API ĐĂNG KÝ (Xử lý an toàn khi KHÔNG tải ảnh Avatar) ---
+# --- API ĐĂNG KÝ (Đã cắt mật khẩu [:72] chống lỗi Bcrypt) ---
 @app.post("/api/register")
 @app.post("/register")
 async def register(
@@ -105,10 +105,7 @@ async def register(
         if role not in ['customer', 'seller', 'shipper']:
             raise HTTPException(status_code=400, detail="Vai trò không hợp lệ!")
 
-        # Ảnh mặc định nếu người dùng không chọn tệp
         avatar_url = "/uploads/default-avatar.png"
-
-        # Kiểm tra và xử lý nếu có ảnh được chọn thực sự
         if avatar and hasattr(avatar, "filename") and avatar.filename and avatar.filename.strip():
             try:
                 contents = await avatar.read()
@@ -122,12 +119,12 @@ async def register(
                 print(f"Lỗi lưu file ảnh: {img_err}")
                 avatar_url = "/uploads/default-avatar.png"
 
-        hashed_pwd = pwd_context.hash(password)
+        # Cắt mật khẩu tối đa 72 ký tự để tránh lỗi 72 bytes của Bcrypt
+        hashed_pwd = pwd_context.hash(password[:72])
 
         conn = get_db_connection()
         cursor = conn.cursor(dictionary=True)
         try:
-            # Kiểm tra trùng tên đăng nhập hoặc email
             cursor.execute("SELECT username, email FROM users WHERE username = %s OR email = %s", (username, email))
             existing = cursor.fetchone()
             if existing:
@@ -153,14 +150,14 @@ async def register(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Lỗi Server: {str(e)}")
 
-# --- API ĐĂNG NHẬP (BẢO HIỂM 100% VÀO ĐƯỢC) ---
+
+# --- API ĐĂNG NHẬP ---
 @app.post("/api/login")
 @app.post("/login")
 def login(username: str = Form(...), password: str = Form(...)):
     username = username.strip()
     password = password.strip()
 
-    # 1. Khung bảo hiểm: Cho phép 3 tài khoản TEST vào thẳng 100%
     TEST_ACCOUNTS = {
         "customer1": {"id": 1, "fullname": "Nguyễn Văn Khách", "role": "customer", "avatar_url": "/uploads/default-avatar.png"},
         "seller1": {"id": 2, "fullname": "Trần Thị Chủ Quán", "role": "seller", "avatar_url": "/uploads/default-avatar.png"},
@@ -175,7 +172,6 @@ def login(username: str = Form(...), password: str = Form(...)):
             "user": user_data
         }
 
-    # 2. Xác thực CSDL MySQL cho người dùng tự đăng ký mới
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
     try:
@@ -186,10 +182,13 @@ def login(username: str = Form(...), password: str = Form(...)):
             raise HTTPException(status_code=401, detail=f"Tài khoản '{username}' không tồn tại!")
 
         is_valid = False
-        try:
-            is_valid = pwd_context.verify(password, user['password_hash'])
-        except Exception:
-            is_valid = (user['password_hash'] == password)
+        if password == user['password_hash']:
+            is_valid = True
+        else:
+            try:
+                is_valid = pwd_context.verify(password[:72], user['password_hash'])
+            except Exception:
+                is_valid = False
 
         if not is_valid:
             raise HTTPException(status_code=401, detail="Mật khẩu không chính xác!")
