@@ -31,6 +31,17 @@ os.makedirs(IMAGE_DIR, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 app.mount("/images", StaticFiles(directory=IMAGE_DIR), name="images")
 
+# --- KHAI BÁO SCHEMA ĐẶT HÀNG (ĐẶT Ở ĐÂY ĐỂ KHÔNG BỊ NameError) ---
+class OrderItemSchema(BaseModel):
+    product_id: int
+    quantity: int
+
+class CreateOrderSchema(BaseModel):
+    customer_id: int
+    delivery_area: str
+    payment_method: str
+    items: List[OrderItemSchema]
+
 # --- MÃ HÓA AN TOÀN SHA-256 PRE-HASH ---
 def hash_password(password: str) -> str:
     sha_str = hashlib.sha256(password.encode('utf-8')).hexdigest()
@@ -48,8 +59,7 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     except Exception:
         return False
 
-# --- TỰ ĐỘNG NẠP VÀ TẠO ĐỦ TẤT CẢ BẢNG CSDL KHI FASTAPI KHỞI ĐỘNG ---
-# --- TỰ ĐỘNG KIỂM TRA BẢNG CSDL KHI FASTAPI KHỞI ĐỘNG (AN TOÀN BẢO TỒN DỮ LIỆU) ---
+# --- TỰ ĐỘNG BẢO TOÀN VÀ KHỞI TẠO BẢNG CSDL KHI KHỞI ĐỘNG ---
 @app.on_event("startup")
 def startup_db_check():
     try:
@@ -110,7 +120,7 @@ def startup_db_check():
         conn.commit()
         cursor.close()
         conn.close()
-        print(">>> [PERSISTENCE OK] CSDL và các bảng đã được bảo toàn nguyên vẹn!")
+        print(">>> [SUCCESS] CSDL và các bảng đã được kiểm tra thành công!")
     except Exception as e:
         print(f">>> [WARNING] Khởi tạo CSDL: {e}")
 
@@ -164,7 +174,7 @@ async def register(
             existing = cursor.fetchone()
             if existing:
                 if existing['username'] == username:
-                    raise HTTPException(status_code=400, detail=f"Tên đăng nhập '{username}' đã tồn tại! Vui lòng chọn tên khác.")
+                    raise HTTPException(status_code=400, detail=f"Tên đăng nhập '{username}' đã tồn tại!")
                 else:
                     raise HTTPException(status_code=400, detail=f"Email '{email}' đã được sử dụng!")
 
@@ -294,7 +304,7 @@ def get_products(search: Optional[str] = None):
         cursor.close()
         conn.close()
 
-# --- API TẠO ĐƠN HÀNG (ĐÃ THÊM VALIDATE SỐ LƯỢNG MÓN) ---
+# --- API TẠO ĐƠN HÀNG ---
 @app.post("/orders")
 @app.post("/api/orders")
 def create_order(order: CreateOrderSchema):
@@ -307,7 +317,7 @@ def create_order(order: CreateOrderSchema):
         total_amount = 0
         for item in order.items:
             if item.quantity <= 0 or item.quantity > 100:
-                raise HTTPException(status_code=400, detail=f"Số lượng món không hợp lệ (từ 1 đến 100)!")
+                raise HTTPException(status_code=400, detail="Số lượng món không hợp lệ (từ 1 đến 100)!")
 
             cursor.execute("SELECT price FROM products WHERE id = %s", (item.product_id,))
             p = cursor.fetchone()
