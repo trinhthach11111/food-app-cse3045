@@ -1,0 +1,6 @@
+frontend/uploads/*
+!frontend/uploads/.gitkeep
+frontend/images/prod_*
+venv/
+__pycache__/
+*.pyc
