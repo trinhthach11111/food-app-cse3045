@@ -350,5 +350,27 @@ def create_order(order: CreateOrderSchema):
     finally:
         cursor.close()
         conn.close()
+        # --- API LẤY DANH SÁCH ĐƠN HÀNG CỦA KHÁCH HÀNG ---
+@app.get("/orders/customer/{customer_id}")
+@app.get("/api/orders/customer/{customer_id}")
+def get_customer_orders(customer_id: int):
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+    try:
+        sql = """
+            SELECT o.id, o.total_amount, o.payment_method, o.status, o.created_at, o.delivery_area,
+                   GROUP_CONCAT(CONCAT(p.name, ' (x', oi.quantity, ')') SEPARATOR ', ') AS items_summary
+            FROM orders o
+            JOIN order_items oi ON o.id = oi.order_id
+            JOIN products p ON oi.product_id = p.id
+            WHERE o.customer_id = %s
+            GROUP BY o.id
+            ORDER BY o.created_at DESC
+        """
+        cursor.execute(sql, (customer_id,))
+        return cursor.fetchall()
+    finally:
+        cursor.close()
+        conn.close()
 
 app.mount("/", StaticFiles(directory="frontend", html=True), name="frontend")
